@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	dockerfilters "github.com/docker/docker/pkg/parsers/filters"
 	"github.com/docker/swarm/cluster"
 	"github.com/docker/swarm/version"
@@ -219,6 +220,16 @@ func getContainersJSON(c *context, w http.ResponseWriter, r *http.Request) {
 		httpError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		httpError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Debug("CX: Adding automagic label filter")
+	filters["label"] = append(filters["label"], "slice="+hostname)
+
 	filtExited := []int{}
 	if i, ok := filters["exited"]; ok {
 		for _, value := range i {
