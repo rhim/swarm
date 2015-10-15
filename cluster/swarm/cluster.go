@@ -110,13 +110,10 @@ func (c *Cluster) generateUniqueID() string {
 
 // CreateContainer aka schedule a brand new container into the cluster.
 func (c *Cluster) CreateContainer(config *cluster.ContainerConfig, name string) (*cluster.Container, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, err
-	}
 
-	log.Debug("CX: Adding lable slice=" + hostname)
-	config.Labels["slice"] = hostname
+	sliceName := os.Getenv("CX_SLICE")
+	log.Debug("CX: Adding lable slice=" + sliceName)
+	config.Labels["slice"] = sliceName
 
 	container, err := c.createContainer(config, name, false)
 

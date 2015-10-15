@@ -221,14 +221,8 @@ func getContainersJSON(c *context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		httpError(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	log.Debug("CX: Adding automagic label filter")
-	filters["label"] = append(filters["label"], "slice="+hostname)
+	filters["label"] = append(filters["label"], "slice="+os.Getenv("CX_SLICE"))
 
 	filtExited := []int{}
 	if i, ok := filters["exited"]; ok {
