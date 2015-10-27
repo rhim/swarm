@@ -22,8 +22,8 @@ import (
 	"github.com/samalba/dockerclient"
 )
 
-// The Client API version
-const APIVERSION = "1.16"
+// APIVERSION is the API version supported by swarm manager
+const APIVERSION = "1.21"
 
 // GET /info
 func getInfo(c *context, w http.ResponseWriter, r *http.Request) {
@@ -172,10 +172,24 @@ func getImagesJSON(c *context, w http.ResponseWriter, r *http.Request) {
 
 // GET /networks
 func getNetworks(c *context, w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		httpError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	filters, err := dockerfilters.FromParam(r.Form.Get("filters"))
+	if err != nil {
+		httpError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	out := []*dockerclient.NetworkResource{}
-	for _, network := range c.cluster.Networks() {
+	networks := c.cluster.Networks().Filter(filters["name"], filters["id"])
+	for _, network := range networks {
 		tmp := (*network).NetworkResource
-		tmp.Name = network.Engine.Name + "/" + network.Name
+		if tmp.Scope == "local" {
+			tmp.Name = network.Engine.Name + "/" + network.Name
+		}
 		out = append(out, &tmp)
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -455,8 +469,8 @@ func postNetworksCreate(c *context, w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// POST /volumes
-func postVolumes(c *context, w http.ResponseWriter, r *http.Request) {
+// POST /volumes/create
+func postVolumesCreate(c *context, w http.ResponseWriter, r *http.Request) {
 	var request dockerclient.VolumeCreateRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -483,7 +497,6 @@ func postImagesCreate(c *context, w http.ResponseWriter, r *http.Request) {
 
 	wf := NewWriteFlusher(w)
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
 
 	if image := r.Form.Get("fromImage"); image != "" { //pull
 		authConfig := dockerclient.AuthConfig{}
@@ -496,10 +509,12 @@ func postImagesCreate(c *context, w http.ResponseWriter, r *http.Request) {
 			image += ":" + tag
 		}
 
+		var errorMessage string
 		errorFound := false
 		callback := func(what, status string, err error) {
 			if err != nil {
 				errorFound = true
+				errorMessage = err.Error()
 				sendJSONMessage(wf, what, fmt.Sprintf("Pulling %s... : %s", image, err.Error()))
 				return
 			}
@@ -512,7 +527,7 @@ func postImagesCreate(c *context, w http.ResponseWriter, r *http.Request) {
 		c.cluster.Pull(image, &authConfig, callback)
 
 		if errorFound {
-			sendErrorJSONMessage(wf, 1, "")
+			sendErrorJSONMessage(wf, 1, errorMessage)
 		}
 
 	} else { //import
@@ -520,10 +535,12 @@ func postImagesCreate(c *context, w http.ResponseWriter, r *http.Request) {
 		repo := r.Form.Get("repo")
 		tag := r.Form.Get("tag")
 
+		var errorMessage string
 		errorFound := false
 		callback := func(what, status string, err error) {
 			if err != nil {
 				errorFound = true
+				errorMessage = err.Error()
 				sendJSONMessage(wf, what, err.Error())
 				return
 			}
@@ -531,7 +548,7 @@ func postImagesCreate(c *context, w http.ResponseWriter, r *http.Request) {
 		}
 		c.cluster.Import(source, repo, tag, r.Body, callback)
 		if errorFound {
-			sendErrorJSONMessage(wf, 1, "")
+			sendErrorJSONMessage(wf, 1, errorMessage)
 		}
 
 	}
@@ -544,10 +561,12 @@ func postImagesLoad(c *context, w http.ResponseWriter, r *http.Request) {
 
 	// call cluster to load image on every node
 	wf := NewWriteFlusher(w)
+	var errorMessage string
 	errorFound := false
 	callback := func(what, status string, err error) {
 		if err != nil {
 			errorFound = true
+			errorMessage = err.Error()
 			sendJSONMessage(wf, what, fmt.Sprintf("Loading Image... : %s", err.Error()))
 			return
 		}
@@ -560,7 +579,7 @@ func postImagesLoad(c *context, w http.ResponseWriter, r *http.Request) {
 	}
 	c.cluster.Load(r.Body, callback)
 	if errorFound {
-		sendErrorJSONMessage(wf, 1, "")
+		sendErrorJSONMessage(wf, 1, errorMessage)
 	}
 
 }
@@ -686,7 +705,7 @@ func deleteNetworks(c *context, w http.ResponseWriter, r *http.Request) {
 
 	var id = mux.Vars(r)["networkid"]
 
-	if network := c.cluster.Networks().Get(id); network != nil {
+	if network := c.cluster.Networks().Uniq().Get(id); network != nil {
 		if err := c.cluster.RemoveNetwork(network); err != nil {
 			httpError(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -914,6 +933,12 @@ func postBuild(c *context, w http.ResponseWriter, r *http.Request) {
 		CpuSetMems:     r.Form.Get("cpusetmems"),
 		CgroupParent:   r.Form.Get("cgroupparent"),
 		Context:        r.Body,
+		BuildArgs:      make(map[string]string),
+	}
+
+	buildArgsJSON := r.Form.Get("buildargs")
+	if buildArgsJSON != "" {
+		json.Unmarshal([]byte(buildArgsJSON), &buildImage.BuildArgs)
 	}
 
 	authEncoded := r.Header.Get("X-Registry-Auth")

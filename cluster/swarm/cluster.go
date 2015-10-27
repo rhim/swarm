@@ -31,7 +31,10 @@ func (p *pendingContainer) ToContainer() *cluster.Container {
 	container := &cluster.Container{
 		Container: dockerclient.Container{},
 		Config:    p.Config,
-		Engine:    p.Engine,
+		Info: dockerclient.ContainerInfo{
+			HostConfig: &dockerclient.HostConfig{},
+		},
+		Engine: p.Engine,
 	}
 
 	if p.Name != "" {
@@ -155,7 +158,7 @@ func (c *Cluster) createContainer(config *cluster.ContainerConfig, name string, 
 	engine, ok := c.engines[n.ID]
 	if !ok {
 		c.scheduler.Unlock()
-		return nil, nil
+		return nil, fmt.Errorf("error creating container")
 	}
 
 	c.pendingContainers[swarmID] = &pendingContainer{
@@ -182,7 +185,9 @@ func (c *Cluster) RemoveContainer(container *cluster.Container, force, volumes b
 
 // RemoveNetwork removes a network from the cluster
 func (c *Cluster) RemoveNetwork(network *cluster.Network) error {
-	return network.Engine.RemoveNetwork(network)
+	err := network.Engine.RemoveNetwork(network)
+	c.refreshNetworks()
+	return err
 }
 
 func (c *Cluster) getEngineByAddr(addr string) *cluster.Engine {
@@ -341,6 +346,18 @@ func (c *Cluster) RemoveImages(name string, force bool) ([]*dockerclient.ImageDe
 	return out, err
 }
 
+func (c *Cluster) refreshNetworks() {
+	var wg sync.WaitGroup
+	for _, e := range c.engines {
+		wg.Add(1)
+		go func(e *cluster.Engine) {
+			e.RefreshNetworks()
+			wg.Done()
+		}(e)
+	}
+	wg.Wait()
+}
+
 // CreateNetwork creates a network in the cluster
 func (c *Cluster) CreateNetwork(request *dockerclient.NetworkCreate) (response *dockerclient.NetworkCreateResponse, err error) {
 	var (
@@ -359,7 +376,9 @@ func (c *Cluster) CreateNetwork(request *dockerclient.NetworkCreate) (response *
 		return nil, err
 	}
 	if nodes != nil {
-		return c.engines[nodes[0].ID].CreateNetwork(request)
+		resp, err := c.engines[nodes[0].ID].CreateNetwork(request)
+		c.refreshNetworks()
+		return resp, err
 	}
 	return nil, nil
 }
@@ -758,10 +777,12 @@ func (c *Cluster) BuildImage(buildImage *dockerclient.BuildImage, out io.Writer)
 	c.scheduler.Lock()
 
 	// get an engine
-	config := &cluster.ContainerConfig{dockerclient.ContainerConfig{
+	config := cluster.BuildContainerConfig(dockerclient.ContainerConfig{
 		CpuShares: buildImage.CpuShares,
 		Memory:    buildImage.Memory,
-	}}
+		Env:       convertMapToKVStrings(buildImage.BuildArgs),
+	})
+	buildImage.BuildArgs = convertKVStringsToMap(config.Env)
 	nodes, err := c.scheduler.SelectNodesForContainer(c.listNodes(), config)
 	c.scheduler.Unlock()
 	if err != nil {

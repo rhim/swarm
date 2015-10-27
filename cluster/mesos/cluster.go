@@ -17,7 +17,6 @@ import (
 	"github.com/docker/swarm/cluster/mesos/queue"
 	"github.com/docker/swarm/scheduler"
 	"github.com/docker/swarm/scheduler/node"
-	"github.com/docker/swarm/scheduler/strategy"
 	"github.com/gogo/protobuf/proto"
 	"github.com/mesos/mesos-go/mesosproto"
 	mesosscheduler "github.com/mesos/mesos-go/scheduler"
@@ -178,7 +177,7 @@ func (c *Cluster) CreateContainer(config *cluster.ContainerConfig, name string) 
 		return nil, err
 	case <-time.After(c.taskCreationTimeout):
 		c.pendingTasks.Remove(task)
-		return nil, strategy.ErrNoResourcesAvailable
+		return nil, fmt.Errorf("container failed to start after %s", c.taskCreationTimeout)
 	}
 }
 
@@ -515,7 +514,9 @@ func (c *Cluster) scheduleTask(t *task) bool {
 	if data != nil && json.Unmarshal(data, &inspect) == nil && len(inspect) == 1 {
 		container := &cluster.Container{Container: dockerclient.Container{Id: inspect[0].Id}, Engine: s.engine}
 		if container, err := container.Refresh(); err == nil {
-			t.container <- container
+			if !t.done {
+				t.container <- container
+			}
 			return true
 		}
 	}
@@ -528,12 +529,16 @@ func (c *Cluster) scheduleTask(t *task) bool {
 
 	for _, container := range s.engine.Containers() {
 		if container.Config.Labels[cluster.SwarmLabelNamespace+".mesos.task"] == taskID {
-			t.container <- container
+			if !t.done {
+				t.container <- container
+			}
 			return true
 		}
 	}
 
-	t.error <- fmt.Errorf("Container failed to create")
+	if !t.done {
+		t.error <- fmt.Errorf("Container failed to create")
+	}
 	return true
 }
 
