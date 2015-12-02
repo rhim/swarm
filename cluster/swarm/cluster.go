@@ -118,9 +118,12 @@ func (c *Cluster) generateUniqueID() string {
 // CreateContainer aka schedule a brand new container into the cluster.
 func (c *Cluster) CreateContainer(config *cluster.ContainerConfig, name string) (*cluster.Container, error) {
 
-	sliceName := os.Getenv("CX_SLICE")
-	log.Debug("CX: Adding lable slice=" + sliceName)
-	config.Labels["slice"] = sliceName
+	poolUUID := os.Getenv("CX_POOL")
+	log.Debug("CX: Adding label pool=" + poolUUID)
+	config.Labels["pool"] = poolUUID
+
+	log.Debug("CX: Adding container to the default pool network")
+	config.HostConfig.NetworkMode = poolUUID
 
 	container, err := c.createContainer(config, name, false)
 

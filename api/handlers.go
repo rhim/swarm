@@ -252,7 +252,7 @@ func getContainersJSON(c *context, w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Debug("CX: Adding automagic label filter")
-	filters["label"] = append(filters["label"], "slice="+os.Getenv("CX_SLICE"))
+	filters["label"] = append(filters["label"], "pool="+os.Getenv("CX_POOL"))
 
 	filtExited := []int{}
 	if i, ok := filters["exited"]; ok {
