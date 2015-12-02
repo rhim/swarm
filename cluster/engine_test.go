@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"time"
 
-	dockerfilters "github.com/docker/docker/pkg/parsers/filters"
 	"github.com/samalba/dockerclient"
 	"github.com/samalba/dockerclient/mockclient"
 	"github.com/samalba/dockerclient/nopclient"
@@ -30,10 +30,16 @@ var (
 	mockVersion = &dockerclient.Version{
 		Version: "1.6.2",
 	}
+
+	engOpts = &EngineOpts{
+		RefreshMinInterval: time.Duration(30) * time.Second,
+		RefreshMaxInterval: time.Duration(60) * time.Second,
+		RefreshRetry:       3,
+	}
 )
 
 func TestEngineConnectionFailure(t *testing.T) {
-	engine := NewEngine("test", 0)
+	engine := NewEngine("test", 0, engOpts)
 	assert.False(t, engine.isConnected())
 
 	// Always fail.
@@ -52,7 +58,7 @@ func TestEngineConnectionFailure(t *testing.T) {
 }
 
 func TestOutdatedEngine(t *testing.T) {
-	engine := NewEngine("test", 0)
+	engine := NewEngine("test", 0, engOpts)
 	client := mockclient.NewMockClient()
 	client.On("Info").Return(&dockerclient.Info{}, nil)
 
@@ -66,7 +72,7 @@ func TestOutdatedEngine(t *testing.T) {
 }
 
 func TestEngineCpusMemory(t *testing.T) {
-	engine := NewEngine("test", 0)
+	engine := NewEngine("test", 0, engOpts)
 	assert.False(t, engine.isConnected())
 
 	client := mockclient.NewMockClient()
@@ -89,7 +95,7 @@ func TestEngineCpusMemory(t *testing.T) {
 }
 
 func TestEngineSpecs(t *testing.T) {
-	engine := NewEngine("test", 0)
+	engine := NewEngine("test", 0, engOpts)
 	assert.False(t, engine.isConnected())
 
 	client := mockclient.NewMockClient()
@@ -117,7 +123,7 @@ func TestEngineSpecs(t *testing.T) {
 }
 
 func TestEngineState(t *testing.T) {
-	engine := NewEngine("test", 0)
+	engine := NewEngine("test", 0, engOpts)
 	assert.False(t, engine.isConnected())
 
 	client := mockclient.NewMockClient()
@@ -166,7 +172,7 @@ func TestCreateContainer(t *testing.T) {
 			Cmd:       []string{"date"},
 			Tty:       false,
 		}}
-		engine = NewEngine("test", 0)
+		engine = NewEngine("test", 0, engOpts)
 		client = mockclient.NewMockClient()
 	)
 
@@ -201,9 +207,9 @@ func TestCreateContainer(t *testing.T) {
 	// Image not found, pullImage == false
 	name = "test2"
 	mockConfig.CpuShares = int64(math.Ceil(float64(config.CpuShares*1024) / float64(mockInfo.NCPU)))
-	client.On("CreateContainer", &mockConfig, name).Return("", dockerclient.ErrNotFound).Once()
+	client.On("CreateContainer", &mockConfig, name).Return("", dockerclient.ErrImageNotFound).Once()
 	container, err = engine.Create(config, name, false)
-	assert.Equal(t, err, dockerclient.ErrNotFound)
+	assert.Equal(t, err, dockerclient.ErrImageNotFound)
 	assert.Nil(t, container)
 
 	// Image not found, pullImage == true, and the image can be pulled successfully
@@ -211,7 +217,7 @@ func TestCreateContainer(t *testing.T) {
 	id = "id3"
 	mockConfig.CpuShares = int64(math.Ceil(float64(config.CpuShares*1024) / float64(mockInfo.NCPU)))
 	client.On("PullImage", config.Image+":latest", mock.Anything).Return(nil).Once()
-	client.On("CreateContainer", &mockConfig, name).Return("", dockerclient.ErrNotFound).Once()
+	client.On("CreateContainer", &mockConfig, name).Return("", dockerclient.ErrImageNotFound).Once()
 	client.On("CreateContainer", &mockConfig, name).Return(id, nil).Once()
 	client.On("ListContainers", true, false, fmt.Sprintf(`{"id":[%q]}`, id)).Return([]dockerclient.Container{{Id: id}}, nil).Once()
 	client.On("ListImages", mock.Anything).Return([]*dockerclient.Image{}, nil).Once()
@@ -225,50 +231,33 @@ func TestCreateContainer(t *testing.T) {
 }
 
 func TestImages(t *testing.T) {
-	engine := NewEngine("test", 0)
+	engine := NewEngine("test", 0, engOpts)
 	engine.images = []*Image{
 		{dockerclient.Image{Id: "a"}, engine},
 		{dockerclient.Image{Id: "b"}, engine},
 		{dockerclient.Image{Id: "c"}, engine},
 	}
 
-	result := engine.Images(true, nil)
+	result := engine.Images()
 	assert.Equal(t, len(result), 3)
 }
 
-func TestImagesWithFilter(t *testing.T) {
-	engine := NewEngine("test", 0)
-	engine.images = []*Image{
-		{dockerclient.Image{Id: "a"}, engine},
-		{dockerclient.Image{
-			Id:     "b",
-			Labels: map[string]string{"com.example.project": "bar"},
-		}, engine},
-		{dockerclient.Image{Id: "c"}, engine},
-	}
-
-	filters := dockerfilters.Args{"label": {"com.example.project=bar"}}
-	result := engine.Images(true, filters)
-	assert.Equal(t, len(result), 1)
-	assert.Equal(t, result[0].Id, "b")
-}
-
 func TestTotalMemory(t *testing.T) {
-	engine := NewEngine("test", 0.05)
+	engine := NewEngine("test", 0.05, engOpts)
 	engine.Memory = 1024
 	assert.Equal(t, engine.TotalMemory(), int64(1024+1024*5/100))
 
-	engine = NewEngine("test", 0)
+	engine = NewEngine("test", 0, engOpts)
 	engine.Memory = 1024
 	assert.Equal(t, engine.TotalMemory(), int64(1024))
 }
 
 func TestTotalCpus(t *testing.T) {
-	engine := NewEngine("test", 0.05)
+	engine := NewEngine("test", 0.05, engOpts)
 	engine.Cpus = 2
 	assert.Equal(t, engine.TotalCpus(), int64(2+2*5/100))
 
-	engine = NewEngine("test", 0)
+	engine = NewEngine("test", 0, engOpts)
 	engine.Cpus = 2
 	assert.Equal(t, engine.TotalCpus(), int64(2))
 }
@@ -279,7 +268,7 @@ func TestUsedCpus(t *testing.T) {
 		hostNcpu      = []int64{1, 2, 4, 8, 10, 12, 16, 20, 32, 36, 40, 48}
 	)
 
-	engine := NewEngine("test", 0)
+	engine := NewEngine("test", 0, engOpts)
 	client := mockclient.NewMockClient()
 
 	for _, hn := range hostNcpu {
@@ -312,7 +301,7 @@ func TestContainerRemovedDuringRefresh(t *testing.T) {
 		info2      = &dockerclient.ContainerInfo{Id: "c2", Config: &dockerclient.ContainerConfig{}}
 	)
 
-	engine := NewEngine("test", 0)
+	engine := NewEngine("test", 0, engOpts)
 	assert.False(t, engine.isConnected())
 
 	// A container is removed before it can be inspected.

@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 
 	log "github.com/Sirupsen/logrus"
-	dockerfilters "github.com/docker/docker/pkg/parsers/filters"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/pkg/units"
 	"github.com/docker/swarm/cluster"
@@ -29,8 +29,10 @@ type pendingContainer struct {
 
 func (p *pendingContainer) ToContainer() *cluster.Container {
 	container := &cluster.Container{
-		Container: dockerclient.Container{},
-		Config:    p.Config,
+		Container: dockerclient.Container{
+			Labels: p.Config.Labels,
+		},
+		Config: p.Config,
 		Info: dockerclient.ContainerInfo{
 			HostConfig: &dockerclient.HostConfig{},
 		},
@@ -55,11 +57,12 @@ type Cluster struct {
 	pendingContainers map[string]*pendingContainer
 
 	overcommitRatio float64
+	engineOpts      *cluster.EngineOpts
 	TLSConfig       *tls.Config
 }
 
 // NewCluster is exported
-func NewCluster(scheduler *scheduler.Scheduler, TLSConfig *tls.Config, discovery discovery.Discovery, options cluster.DriverOpts) (cluster.Cluster, error) {
+func NewCluster(scheduler *scheduler.Scheduler, TLSConfig *tls.Config, discovery discovery.Discovery, options cluster.DriverOpts, engineOptions *cluster.EngineOpts) (cluster.Cluster, error) {
 	log.WithFields(log.Fields{"name": "swarm"}).Debug("Initializing cluster")
 
 	cluster := &Cluster{
@@ -69,6 +72,7 @@ func NewCluster(scheduler *scheduler.Scheduler, TLSConfig *tls.Config, discovery
 		discovery:         discovery,
 		pendingContainers: make(map[string]*pendingContainer),
 		overcommitRatio:   0.05,
+		engineOpts:        engineOptions,
 	}
 
 	if val, ok := options.Float("swarm.overcommit", ""); ok {
@@ -121,11 +125,14 @@ func (c *Cluster) CreateContainer(config *cluster.ContainerConfig, name string) 
 	container, err := c.createContainer(config, name, false)
 
 	//  fails with image not found, then try to reschedule with soft-image-affinity
-	if err != nil && strings.HasSuffix(err.Error(), "not found") && !config.HaveNodeConstraint() {
-		// Check if the image exists in the cluster
-		// If exists, retry with a soft-image-affinity
-		if image := c.Image(config.Image); image != nil {
-			container, err = c.createContainer(config, name, true)
+	if err != nil {
+		bImageNotFoundError, _ := regexp.MatchString(`image \S* not found`, err.Error())
+		if bImageNotFoundError && !config.HaveNodeConstraint() {
+			// Check if the image exists in the cluster
+			// If exists, retry with a soft-image-affinity
+			if image := c.Image(config.Image); image != nil {
+				container, err = c.createContainer(config, name, true)
+			}
 		}
 	}
 	return container, err
@@ -212,7 +219,7 @@ func (c *Cluster) addEngine(addr string) bool {
 		return false
 	}
 
-	engine := cluster.NewEngine(addr, c.overcommitRatio)
+	engine := cluster.NewEngine(addr, c.overcommitRatio, c.engineOpts)
 	if err := engine.RegisterEventHandler(c); err != nil {
 		log.Error(err)
 	}
@@ -288,15 +295,14 @@ func (c *Cluster) monitorDiscovery(ch <-chan discovery.Entries, errCh <-chan err
 }
 
 // Images returns all the images in the cluster.
-func (c *Cluster) Images(all bool, filters dockerfilters.Args) []*cluster.Image {
+func (c *Cluster) Images() cluster.Images {
 	c.RLock()
 	defer c.RUnlock()
 
 	out := []*cluster.Image{}
 	for _, e := range c.engines {
-		out = append(out, e.Images(all, filters)...)
+		out = append(out, e.Images()...)
 	}
-
 	return out
 }
 
@@ -327,7 +333,7 @@ func (c *Cluster) RemoveImages(name string, force bool) ([]*dockerclient.ImageDe
 	errs := []string{}
 	var err error
 	for _, e := range c.engines {
-		for _, image := range e.Images(true, nil) {
+		for _, image := range e.Images() {
 			if image.Match(name, true) {
 				content, err := image.Engine.RemoveImage(image, name, force)
 				if err != nil {
@@ -812,7 +818,7 @@ func (c *Cluster) TagImage(IDOrName string, repo string, tag string, force bool)
 	var err error
 	found := false
 	for _, e := range c.engines {
-		for _, image := range e.Images(true, nil) {
+		for _, image := range e.Images() {
 			if image.Match(IDOrName, true) {
 				found = true
 				err := image.Engine.TagImage(IDOrName, repo, tag, force)

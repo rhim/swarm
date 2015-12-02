@@ -29,7 +29,7 @@ const APIVERSION = "1.21"
 func getInfo(c *context, w http.ResponseWriter, r *http.Request) {
 	info := dockerclient.Info{
 		Containers:        int64(len(c.cluster.Containers())),
-		Images:            int64(len(c.cluster.Images(false, nil))),
+		Images:            int64(len(c.cluster.Images().Filter(cluster.ImageFilterOptions{}))),
 		DriverStatus:      c.statusHandler.Status(),
 		NEventsListener:   int64(c.eventsHandler.Size()),
 		Debug:             c.debug,
@@ -79,7 +79,7 @@ func getImages(c *context, w http.ResponseWriter, r *http.Request) {
 
 	// Create a map of engine address to the list of images it holds.
 	engineImages := make(map[string][]*cluster.Image)
-	for _, image := range c.cluster.Images(true, nil) {
+	for _, image := range c.cluster.Images() {
 		engineImages[image.Engine.Addr] = append(engineImages[image.Engine.Addr], image)
 	}
 
@@ -115,8 +115,6 @@ func getImagesJSON(c *context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	all := boolValue(r, "all")
-
 	filters, err := dockerfilters.FromParam(r.Form.Get("filters"))
 	if err != nil {
 		httpError(w, err.Error(), http.StatusInternalServerError)
@@ -128,7 +126,12 @@ func getImagesJSON(c *context, w http.ResponseWriter, r *http.Request) {
 	// this struct helps grouping images
 	// but still keeps their Engine infos as an array.
 	groupImages := make(map[string]dockerclient.Image)
-	for _, image := range c.cluster.Images(all, filters) {
+	opts := cluster.ImageFilterOptions{
+		All:        boolValue(r, "all"),
+		NameFilter: r.FormValue("filter"),
+		Filters:    filters,
+	}
+	for _, image := range c.cluster.Images().Filter(opts) {
 		if len(accepteds) != 0 {
 			found := false
 			for _, accepted := range accepteds {
@@ -145,6 +148,7 @@ func getImagesJSON(c *context, w http.ResponseWriter, r *http.Request) {
 		// grouping images by Id, and concat their RepoTags
 		if entry, existed := groupImages[image.Id]; existed {
 			entry.RepoTags = append(entry.RepoTags, image.RepoTags...)
+			entry.RepoDigests = append(entry.RepoDigests, image.RepoDigests...)
 			groupImages[image.Id] = entry
 		} else {
 			groupImages[image.Id] = image.Image
@@ -164,6 +168,18 @@ func getImagesJSON(c *context, w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		image.RepoTags = result
+
+		// de-duplicate RepoDigests
+		result = []string{}
+		seen = map[string]bool{}
+		for _, val := range image.RepoDigests {
+			if _, ok := seen[val]; !ok {
+				result = append(result, val)
+				seen[val] = true
+			}
+		}
+		image.RepoDigests = result
+
 		images = append(images, image)
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -271,7 +287,11 @@ func getContainersJSON(c *context, w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Apply filters.
-		if !filters.Match("name", strings.TrimPrefix(container.Names[0], "/")) {
+		if len(container.Names) > 0 {
+			if !filters.Match("name", strings.TrimPrefix(container.Names[0], "/")) {
+				continue
+			}
+		} else if len(filters["name"]) > 0 {
 			continue
 		}
 		if !filters.Match("id", container.Id) {
@@ -506,7 +526,11 @@ func postImagesCreate(c *context, w http.ResponseWriter, r *http.Request) {
 		}
 
 		if tag := r.Form.Get("tag"); tag != "" {
-			image += ":" + tag
+			if tagHasDigest(tag) {
+				image += "@" + tag
+			} else {
+				image += ":" + tag
+			}
 		}
 
 		var errorMessage string
@@ -746,7 +770,7 @@ func ping(c *context, w http.ResponseWriter, r *http.Request) {
 // Proxy a request to the right node
 func proxyNetwork(c *context, w http.ResponseWriter, r *http.Request) {
 	var id = mux.Vars(r)["networkid"]
-	if network := c.cluster.Networks().Get(id); network != nil {
+	if network := c.cluster.Networks().Uniq().Get(id); network != nil {
 
 		// Set the network ID in the proxied URL path.
 		r.URL.Path = strings.Replace(r.URL.Path, id, network.ID, 1)
@@ -819,17 +843,41 @@ func proxyImage(c *context, w http.ResponseWriter, r *http.Request) {
 	httpError(w, fmt.Sprintf("No such image: %s", name), http.StatusNotFound)
 }
 
-// Proxy a request to the right node
-func proxyImageTagOptional(c *context, w http.ResponseWriter, r *http.Request) {
+// Proxy get image request to the right node
+func proxyImageGet(c *context, w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 
-	for _, image := range c.cluster.Images(true, nil) {
+	for _, image := range c.cluster.Images() {
 		if len(strings.SplitN(name, ":", 2)) == 2 && image.Match(name, true) ||
 			len(strings.SplitN(name, ":", 2)) == 1 && image.Match(name, false) {
 			proxy(c.tlsConfig, image.Engine.Addr, w, r)
 			return
 		}
 	}
+	httpError(w, fmt.Sprintf("No such image: %s", name), http.StatusNotFound)
+}
+
+// Proxy push image request to the right node
+func proxyImagePush(c *context, w http.ResponseWriter, r *http.Request) {
+	name := mux.Vars(r)["name"]
+
+	if err := r.ParseForm(); err != nil {
+		httpError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tag := r.Form.Get("tag")
+	if tag != "" {
+		name = name + ":" + tag
+	}
+
+	for _, image := range c.cluster.Images() {
+		if tag != "" && image.Match(name, true) ||
+			tag == "" && image.Match(name, false) {
+			proxy(c.tlsConfig, image.Engine.Addr, w, r)
+			return
+		}
+	}
+
 	httpError(w, fmt.Sprintf("No such image: %s", name), http.StatusNotFound)
 }
 

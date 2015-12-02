@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	dockerfilters "github.com/docker/docker/pkg/parsers/filters"
 	"github.com/docker/swarm/cluster"
 	"github.com/docker/swarm/cluster/mesos/queue"
 	"github.com/docker/swarm/scheduler"
@@ -38,6 +38,7 @@ type Cluster struct {
 	offerTimeout        time.Duration
 	taskCreationTimeout time.Duration
 	pendingTasks        *queue.Queue
+	engineOpts          *cluster.EngineOpts
 }
 
 const (
@@ -45,7 +46,7 @@ const (
 	defaultDockerEnginePort    = "2375"
 	defaultDockerEngineTLSPort = "2376"
 	dockerPortAttribute        = "docker_port"
-	defaultOfferTimeout        = 10 * time.Minute
+	defaultOfferTimeout        = 30 * time.Second
 	defaultTaskCreationTimeout = 5 * time.Second
 )
 
@@ -55,9 +56,13 @@ var (
 )
 
 // NewCluster for mesos Cluster creation
-func NewCluster(scheduler *scheduler.Scheduler, TLSConfig *tls.Config, master string, options cluster.DriverOpts) (cluster.Cluster, error) {
+func NewCluster(scheduler *scheduler.Scheduler, TLSConfig *tls.Config, master string, options cluster.DriverOpts, engineOptions *cluster.EngineOpts) (cluster.Cluster, error) {
 	log.WithFields(log.Fields{"name": "mesos"}).Debug("Initializing cluster")
 
+	// Enabling mesos-go glog logging
+	if log.GetLevel() == log.DebugLevel {
+		flag.Lookup("logtostderr").Value.Set("true")
+	}
 	cluster := &Cluster{
 		dockerEnginePort:    defaultDockerEnginePort,
 		master:              master,
@@ -67,6 +72,7 @@ func NewCluster(scheduler *scheduler.Scheduler, TLSConfig *tls.Config, master st
 		options:             &options,
 		offerTimeout:        defaultOfferTimeout,
 		taskCreationTimeout: defaultTaskCreationTimeout,
+		engineOpts:          engineOptions,
 	}
 
 	cluster.pendingTasks = queue.NewQueue()
@@ -190,15 +196,14 @@ func (c *Cluster) RemoveContainer(container *cluster.Container, force, volumes b
 }
 
 // Images returns all the images in the cluster.
-func (c *Cluster) Images(all bool, filters dockerfilters.Args) []*cluster.Image {
+func (c *Cluster) Images() cluster.Images {
 	c.RLock()
 	defer c.RUnlock()
 
 	out := []*cluster.Image{}
 	for _, s := range c.slaves {
-		out = append(out, s.engine.Images(all, filters)...)
+		out = append(out, s.engine.Images()...)
 	}
-
 	return out
 }
 

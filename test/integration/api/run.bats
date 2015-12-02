@@ -26,6 +26,22 @@ function teardown() {
 	[[ "${output}" == *"cannot specify 64-byte hexadecimal strings"* ]]
 }
 
+@test "docker run with image digest" {
+	start_docker 2
+	swarm_manage
+
+	docker_swarm pull jimmyxian/busybox@sha256:649374debd26307573564fcf9748d39db33ef61fbf88ee84c3af10fd7e08765d
+
+	# make sure no container exist
+	run docker_swarm ps -qa
+	[ "${#lines[@]}" -eq 0 ]
+
+	docker_swarm run -d --name test_container jimmyxian/busybox@sha256:649374debd26307573564fcf9748d39db33ef61fbf88ee84c3af10fd7e08765d sleep 100
+
+	# verify, container is running
+	[ -n $(docker_swarm ps -q --filter=name=test_container --filter=status=running) ]
+}
+
 @test "docker run with resources" {
 	start_docker_with_busybox 2
 	swarm_manage
@@ -107,7 +123,7 @@ function teardown() {
 	[[ "${output}" == *"node-0/test_container"* ]]
 }
 
-@test "docker run - reschedule with soft-image-affinity(have node constraint))" {
+@test "docker run - reschedule with soft-image-affinity and node constraint" {
 	start_docker_with_busybox 1
 	start_docker 1
 
@@ -126,5 +142,21 @@ function teardown() {
 
 	# check error message
 	[[ "${output}" != *"unable to find a node that satisfies"* ]]
-	[[ "${output}" == *"busyboxabcde:latest not found"* ]]
+	[[ "${output}" == *"busyboxabcde not found"* ]]
+}
+
+@test "docker run - with not exist volume driver" {
+	start_docker_with_busybox 2
+	swarm_manage
+
+	# make sure no container exist
+	run docker_swarm ps -qa
+	[ "${#lines[@]}" -eq 0 ]
+
+	# run
+	run docker_swarm run -d --volume-driver=not_exist_volume_driver -v testvolume:/testvolume --name test_container busybox sleep 100
+
+	# check error message
+	[ "$status" -ne 0 ]
+	[[ "${output}" == *"Plugin not found"* ]]
 }
