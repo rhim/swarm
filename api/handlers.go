@@ -182,6 +182,7 @@ func getImagesJSON(c *context, w http.ResponseWriter, r *http.Request) {
 
 		images = append(images, image)
 	}
+	sort.Sort(sort.Reverse(ImageSorter(images)))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(images)
 }
