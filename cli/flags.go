@@ -148,7 +148,7 @@ var (
 	}
 	flLeaderTTL = cli.StringFlag{
 		Name:  "replication-ttl",
-		Value: "30s",
+		Value: "15s",
 		Usage: "Leader lock release time on failure",
 	}
 )
