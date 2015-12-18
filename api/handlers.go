@@ -15,7 +15,7 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	dockerfilters "github.com/docker/docker/pkg/parsers/filters"
+	dockerfilters "github.com/docker/docker/api/types/filters"
 	"github.com/docker/swarm/cluster"
 	"github.com/docker/swarm/version"
 	"github.com/gorilla/mux"
@@ -122,7 +122,7 @@ func getImagesJSON(c *context, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: apply node filter in engine?
-	accepteds, _ := filters["node"]
+	accepteds := filters.Get("node")
 	// this struct helps grouping images
 	// but still keeps their Engine infos as an array.
 	groupImages := make(map[string]dockerclient.Image)
@@ -201,7 +201,7 @@ func getNetworks(c *context, w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := []*dockerclient.NetworkResource{}
-	networks := c.cluster.Networks().Filter(filters["name"], filters["id"])
+	networks := c.cluster.Networks().Filter(filters.Get("name"), filters.Get("id"))
 	for _, network := range networks {
 		tmp := (*network).NetworkResource
 		if tmp.Scope == "local" {
@@ -256,21 +256,17 @@ func getContainersJSON(c *context, w http.ResponseWriter, r *http.Request) {
 	filters["label"] = append(filters["label"], "pool="+os.Getenv("CX_POOL"))
 
 	filtExited := []int{}
-	if i, ok := filters["exited"]; ok {
-		for _, value := range i {
-			code, err := strconv.Atoi(value)
-			if err != nil {
-				httpError(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			filtExited = append(filtExited, code)
+	for _, value := range filters.Get("exited") {
+		code, err := strconv.Atoi(value)
+		if err != nil {
+			httpError(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+		filtExited = append(filtExited, code)
 	}
-	if i, ok := filters["status"]; ok {
-		for _, value := range i {
-			if value == "exited" {
-				all = true
-			}
+	for _, value := range filters.Get("status") {
+		if value == "exited" {
+			all = true
 		}
 	}
 
@@ -292,7 +288,7 @@ func getContainersJSON(c *context, w http.ResponseWriter, r *http.Request) {
 			if !filters.Match("name", strings.TrimPrefix(container.Names[0], "/")) {
 				continue
 			}
-		} else if len(filters["name"]) > 0 {
+		} else if len(filters.Get("name")) > 0 {
 			continue
 		}
 		if !filters.Match("id", container.Id) {
