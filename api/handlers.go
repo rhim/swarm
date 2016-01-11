@@ -15,7 +15,7 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	dockerfilters "github.com/docker/docker/api/types/filters"
+	dockerfilters "github.com/docker/engine-api/types/filters"
 	"github.com/docker/swarm/cluster"
 	"github.com/docker/swarm/version"
 	"github.com/gorilla/mux"
