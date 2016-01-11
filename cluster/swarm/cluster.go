@@ -13,10 +13,10 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/docker/docker/pkg/discovery"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/go-units"
 	"github.com/docker/swarm/cluster"
-	"github.com/docker/swarm/discovery"
 	"github.com/docker/swarm/scheduler"
 	"github.com/docker/swarm/scheduler/node"
 	"github.com/samalba/dockerclient"
@@ -55,7 +55,7 @@ type Cluster struct {
 	engines           map[string]*cluster.Engine
 	pendingEngines    map[string]*cluster.Engine
 	scheduler         *scheduler.Scheduler
-	discovery         discovery.Discovery
+	discovery         discovery.Backend
 	pendingContainers map[string]*pendingContainer
 
 	overcommitRatio float64
@@ -64,7 +64,7 @@ type Cluster struct {
 }
 
 // NewCluster is exported
-func NewCluster(scheduler *scheduler.Scheduler, TLSConfig *tls.Config, discovery discovery.Discovery, options cluster.DriverOpts, engineOptions *cluster.EngineOpts) (cluster.Cluster, error) {
+func NewCluster(scheduler *scheduler.Scheduler, TLSConfig *tls.Config, discovery discovery.Backend, options cluster.DriverOpts, engineOptions *cluster.EngineOpts) (cluster.Cluster, error) {
 	log.WithFields(log.Fields{"name": "swarm"}).Debug("Initializing cluster")
 
 	cluster := &Cluster{
