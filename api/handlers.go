@@ -15,8 +15,11 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/docker/docker/pkg/parsers/kernel"
+	apitypes "github.com/docker/engine-api/types"
 	dockerfilters "github.com/docker/engine-api/types/filters"
 	"github.com/docker/swarm/cluster"
+	"github.com/docker/swarm/experimental"
 	"github.com/docker/swarm/version"
 	"github.com/gorilla/mux"
 	"github.com/samalba/dockerclient"
@@ -56,13 +59,19 @@ func getInfo(c *context, w http.ResponseWriter, r *http.Request) {
 
 // GET /version
 func getVersion(c *context, w http.ResponseWriter, r *http.Request) {
-	version := dockerclient.Version{
-		Version:    "swarm/" + version.VERSION,
-		ApiVersion: APIVERSION,
-		GoVersion:  runtime.Version(),
-		GitCommit:  version.GITCOMMIT,
-		Os:         runtime.GOOS,
-		Arch:       runtime.GOARCH,
+	version := apitypes.Version{
+		Version:      "swarm/" + version.VERSION,
+		APIVersion:   APIVERSION,
+		GoVersion:    runtime.Version(),
+		GitCommit:    version.GITCOMMIT,
+		Os:           runtime.GOOS,
+		Arch:         runtime.GOARCH,
+		Experimental: experimental.ENABLED,
+		BuildTime:    version.BUILDTIME,
+	}
+
+	if kernelVersion, err := kernel.GetKernelVersion(); err == nil {
+		version.KernelVersion = kernelVersion.String()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
