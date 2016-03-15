@@ -122,8 +122,11 @@ func (c *Cluster) CreateContainer(config *cluster.ContainerConfig, name string) 
 	log.Debug("CX: Adding label pool=" + poolUUID)
 	config.Labels["pool"] = poolUUID
 
-	log.Debug("CX: Adding container to the default pool network")
-	config.HostConfig.NetworkMode = poolUUID
+	OS := os.Getenv("CX_OS")
+	if OS == "linux" {
+		log.Debug("CX: Adding container to the default pool network")
+		config.HostConfig.NetworkMode = poolUUID
+	}
 
 	container, err := c.createContainer(config, name, false)
 
