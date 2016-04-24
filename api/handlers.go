@@ -352,6 +352,10 @@ func getContainersJSON(c *context, w http.ResponseWriter, r *http.Request) {
 		httpError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	log.Debug("CX: Adding automagic label filter")
+	filters.Add("label", "pool="+os.Getenv("CX_POOL"))
+
 	filtExited := []int{}
 	for _, value := range filters.Get("exited") {
 		code, err := strconv.Atoi(value)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -144,6 +145,16 @@ func (c *Cluster) StartContainer(container *cluster.Container, hostConfig *docke
 
 // CreateContainer aka schedule a brand new container into the cluster.
 func (c *Cluster) CreateContainer(config *cluster.ContainerConfig, name string, authConfig *types.AuthConfig) (*cluster.Container, error) {
+	poolUUID := os.Getenv("CX_POOL")
+	log.Debug("CX: Adding label pool=" + poolUUID)
+	config.Labels["pool"] = poolUUID
+
+	OS := os.Getenv("CX_OS")
+	if OS == "linux" {
+		log.Debug("CX: Adding container to the default pool network")
+		config.HostConfig.NetworkMode = containertypes.NetworkMode(poolUUID)
+	}
+
 	container, err := c.createContainer(config, name, false, authConfig)
 
 	if err != nil {
