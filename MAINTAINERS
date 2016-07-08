@@ -12,6 +12,7 @@
 	[Org."Core maintainers"]
 		people = [
 			"abronan",
+			"allencloud",
 			"aluzzardi",
 			"chanwit",
 			"dongluochen",
@@ -22,11 +23,10 @@
 		]
 
 	[Org."Docs maintainers"]
-
-	# TODO Describe the docs maintainers role.
-
 		people = [
-			"moxiegirl"
+			"sfsmithcha",
+			"sven",
+			"thajeztah",
 		]
 
 
@@ -64,6 +64,11 @@
 	Email = "al@docker.com"
 	GitHub = "aluzzardi"
 
+	[people.allencloud]
+	Name = "Allen Sun"
+	Email = "allen.sun@daocloud.io"
+	GitHub = "allencloud"
+
 	[people.amitshukla]
 	Name = "Amit Shukla"
 	Email = "amit.shukla@docker.com"
@@ -84,15 +89,25 @@
 	Email = "mbauer@us.ibm.com"
 	GitHub = "mhbauer"
 
-	[people.moxiegirl]
-	Name = "Mary Anthony"
-	Email = "mary.anthony@docker.com"
-	GitHub = "moxiegirl"
-
 	[people.nishanttotla]
 	Name = "Nishant Totla"
 	Email = "nishanttotla@gmail.com"
 	GitHub = "nishanttotla"
+
+	[people.sfsmithcha]
+	Name = "Charles Smith"
+	Email = "charles.smith@docker.com"
+	GitHub = "sfsmithcha"
+
+	[people.sven]
+	Name = "Sven Dowideit"
+	Email = "SvenDowideit@home.org.au"
+	GitHub = "SvenDowideit"
+
+	[people.thajeztah]
+	Name = "Sebastiaan van Stijn"
+	Email = "github@gone.nl"
+	GitHub = "thaJeztah"
 
 	[people.vieux]
 	Name = "Victor Vieux"

@@ -14,7 +14,7 @@ weight=-80
 
 You've [deployed the load balancer, the discovery backend, and a Swarm
 cluster](deploy-infra.md) so now you can build and deploy the voting application
-itself. You do this by starting a number of "dockerized applications" running in
+itself. You do this by starting a number of "Dockerized applications" running in
 containers.
 
 The diagram below shows the final application configuration including the overlay
@@ -33,13 +33,13 @@ This application relies on both an overlay container network and a container
 volume. The Docker Engine provides these two features. You'll create them both
 on the Swarm `manager` instance.
 
-1. Direct your local environmen to the Swarm manager host.
+1. Direct your local environment to the Swarm manager host.
 
     ```bash
     $ eval $(docker-machine env manager)
     ```
 
-    You can create the network on an cluster node at the network is visible on
+    You can create the network on a cluster node at the network is visible on
     them all.
 
 2. Create the `voteapp` container network.
@@ -139,7 +139,7 @@ command below, look for the value constraint.
     --name results-app docker/example-voting-app-result-app
     ```
 
-7. Start voting application twice, on each frontend node.
+7. Start the voting application twice; once on each frontend node.
 
     ```bash
     $ docker -H $(docker-machine ip manager):3376 run -t -d \
@@ -276,9 +276,9 @@ the containers at once. This extra credit
 
 2. Try to create Compose file on your own by reviewing the tasks in this tutorial.
 
-    <a href="http://192.168.99.100:8000/compose/compose-file/#entrypoint" target="_blank">The
-    version 2 Compose file format</a> is the best to use. Translate each `docker
-    run` command into a service in the `docker-compose.yml` file. For example,
+    [The version 2 Compose file format](/compose/compose-file.md)
+    is the best to use. Translate each `docker run` command into a service
+    in the `docker-compose.yml` file. For example,
     this command:
 
     ```bash

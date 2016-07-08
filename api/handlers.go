@@ -49,7 +49,7 @@ func getInfo(c *context, w http.ResponseWriter, r *http.Request) {
 		ServerVersion:     "swarm/" + version.VERSION,
 		OperatingSystem:   runtime.GOOS,
 		Architecture:      runtime.GOARCH,
-		NCPU:              c.cluster.TotalCpus(),
+		NCPU:              int(c.cluster.TotalCpus()),
 		MemTotal:          c.cluster.TotalMemory(),
 		HTTPProxy:         os.Getenv("http_proxy"),
 		HTTPSProxy:        os.Getenv("https_proxy"),
@@ -310,18 +310,18 @@ func getVolume(c *context, w http.ResponseWriter, r *http.Request) {
 
 // GET /volumes
 func getVolumes(c *context, w http.ResponseWriter, r *http.Request) {
-	volumes := struct{ Volumes []*apitypes.Volume }{}
+	volumesListResponse := apitypes.VolumesListResponse{}
 
 	for _, volume := range c.cluster.Volumes() {
 		tmp := (*volume).Volume
 		if tmp.Driver == "local" {
 			tmp.Name = volume.Engine.Name + "/" + volume.Name
 		}
-		volumes.Volumes = append(volumes.Volumes, &tmp)
+		volumesListResponse.Volumes = append(volumesListResponse.Volumes, &tmp)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(volumes)
+	json.NewEncoder(w).Encode(volumesListResponse)
 }
 
 // GET /containers/ps
@@ -404,7 +404,20 @@ func getContainersJSON(c *context, w http.ResponseWriter, r *http.Request) {
 		if !filters.Match("node", container.Engine.Name) {
 			continue
 		}
-
+		if filters.Include("volume") {
+			volumeExist := fmt.Errorf("volume mounted in container")
+			err := filters.WalkValues("volume", func(value string) error {
+				for _, mount := range container.Info.Mounts {
+					if mount.Name == value || mount.Destination == value {
+						return volumeExist
+					}
+				}
+				return nil
+			})
+			if err != volumeExist {
+				continue
+			}
+		}
 		if len(filtExited) > 0 {
 			shouldSkip := true
 			for _, code := range filtExited {
@@ -611,7 +624,7 @@ func deleteContainers(c *context, w http.ResponseWriter, r *http.Request) {
 
 // POST /networks/create
 func postNetworksCreate(c *context, w http.ResponseWriter, r *http.Request) {
-	var request apitypes.NetworkCreate
+	var request apitypes.NetworkCreateRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		httpError(w, err.Error(), http.StatusBadRequest)
@@ -622,7 +635,7 @@ func postNetworksCreate(c *context, w http.ResponseWriter, r *http.Request) {
 		request.Driver = "overlay"
 	}
 
-	response, err := c.cluster.CreateNetwork(&request)
+	response, err := c.cluster.CreateNetwork(request.Name, &request.NetworkCreate)
 	if err != nil {
 		httpError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -669,14 +682,8 @@ func postImagesCreate(c *context, w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			json.Unmarshal(buf, &authConfig)
 		}
-
-		if tag := r.Form.Get("tag"); tag != "" {
-			if tagHasDigest(tag) {
-				image += "@" + tag
-			} else {
-				image += ":" + tag
-			}
-		}
+		tag := r.Form.Get("tag")
+		image := getImageRef(image, tag)
 
 		var errorMessage string
 		errorFound := false
@@ -715,7 +722,8 @@ func postImagesCreate(c *context, w http.ResponseWriter, r *http.Request) {
 			}
 			sendJSONMessage(wf, what, status)
 		}
-		c.cluster.Import(source, repo, tag, r.Body, callback)
+		ref := getImageRef(repo, tag)
+		c.cluster.Import(source, ref, tag, r.Body, callback)
 		if errorFound {
 			sendErrorJSONMessage(wf, 1, errorMessage)
 		}
@@ -801,7 +809,7 @@ func postContainersStart(c *context, w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body.Close()
 
-	if len(buf) <= 2 {
+	if len(buf) <= 2 || (len(buf) == 4 && string(buf) == "null") {
 		hostConfig = nil
 	} else {
 		if err := json.Unmarshal(buf, hostConfig); err != nil {
@@ -1057,6 +1065,7 @@ func proxyContainer(c *context, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if container == nil {
 			httpError(w, err.Error(), http.StatusNotFound)
+			return
 		}
 		httpError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1168,12 +1177,15 @@ func postTagImage(c *context, w http.ResponseWriter, r *http.Request) {
 	tag := r.Form.Get("tag")
 	force := boolValue(r, "force")
 
+	ref := getImageRef(repo, tag)
 	// call cluster tag image
-	if err := c.cluster.TagImage(name, repo, tag, force); err != nil {
+	if err := c.cluster.TagImage(name, ref, force); err != nil {
 		if strings.HasPrefix(err.Error(), "No such image") {
 			httpError(w, err.Error(), http.StatusNotFound)
+			return
 		} else {
 			httpError(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -1215,6 +1227,7 @@ func postCommit(c *context, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if container == nil {
 			httpError(w, err.Error(), http.StatusNotFound)
+			return
 		}
 		httpError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1264,7 +1277,6 @@ func postBuild(c *context, w http.ResponseWriter, r *http.Request) {
 		CPUSetMems:     r.Form.Get("cpusetmems"),
 		CgroupParent:   r.Form.Get("cgroupparent"),
 		ShmSize:        int64ValueOrZero(r, "shmsize"),
-		Context:        r.Body,
 	}
 
 	buildArgsJSON := r.Form.Get("buildargs")
@@ -1293,7 +1305,7 @@ func postBuild(c *context, w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	wf := NewWriteFlusher(w)
 
-	err := c.cluster.BuildImage(buildImage, wf)
+	err := c.cluster.BuildImage(r.Body, buildImage, wf)
 	if err != nil {
 		httpError(w, err.Error(), http.StatusInternalServerError)
 	}
@@ -1305,6 +1317,7 @@ func postRenameContainer(c *context, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if container == nil {
 			httpError(w, err.Error(), http.StatusNotFound)
+			return
 		}
 		httpError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1318,8 +1331,10 @@ func postRenameContainer(c *context, w http.ResponseWriter, r *http.Request) {
 	if err = c.cluster.RenameContainer(container, r.Form.Get("name")); err != nil {
 		if strings.HasPrefix(err.Error(), "Conflict") {
 			httpError(w, err.Error(), http.StatusConflict)
+			return
 		} else {
 			httpError(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -1332,6 +1347,7 @@ func proxyHijack(c *context, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if container == nil {
 			httpError(w, err.Error(), http.StatusNotFound)
+			return
 		}
 		httpError(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -35,7 +35,7 @@ The following analogy may be useful. It is common practice that passports are
 used to verify an individual's identity. Passports usually contain a photograph
 and biometric information that identify the owner. A passport also lists the
 country that issued it, as well as *valid from* and *valid to* dates. Digital
-certificates are very similar. The text below is an extract from a a digital
+certificates are very similar. The text below is an extract from a digital
 certificate:
 
 ```
@@ -73,7 +73,7 @@ certificates to increase security.
 
 <!--[metadata]>Need to know about encryption too<![end-metadata]-->
 
-You can configure both the Docker Egnine CLI and the Docker Engine daemon to require
+You can configure both the Docker Engine CLI and the Docker Engine daemon to require
 TLS for authentication. Configuring TLS means that all communications between
 the Docker Engine CLI and the Docker Engine daemon must be accompanied with, and signed by a
 trusted digital certificate. The Docker Engine CLI must provide its digital certificate

@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +18,6 @@ import (
 	"golang.org/x/net/context"
 
 	log "github.com/Sirupsen/logrus"
-	"github.com/docker/distribution/reference"
 	"github.com/docker/docker/pkg/version"
 	engineapi "github.com/docker/engine-api/client"
 	"github.com/docker/engine-api/types"
@@ -108,7 +108,7 @@ type Engine struct {
 	IP      string
 	Addr    string
 	Name    string
-	Cpus    int
+	Cpus    int64
 	Memory  int64
 	Labels  map[string]string
 	Version string
@@ -448,7 +448,7 @@ func (e *Engine) updateClientVersionFromServer(serverVersion string) {
 
 // Gather engine specs (CPU, memory, constraints, ...).
 func (e *Engine) updateSpecs() error {
-	info, err := e.apiClient.Info(context.TODO())
+	info, err := e.apiClient.Info(context.Background())
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -458,7 +458,7 @@ func (e *Engine) updateSpecs() error {
 		return fmt.Errorf("cannot get resources for this engine, make sure %s is a Docker Engine, not a Swarm manager", e.Addr)
 	}
 
-	v, err := e.apiClient.ServerVersion(context.TODO())
+	v, err := e.apiClient.ServerVersion(context.Background())
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -492,7 +492,7 @@ func (e *Engine) updateSpecs() error {
 		return fmt.Errorf(message)
 	}
 	e.Name = info.Name
-	e.Cpus = info.NCPU
+	e.Cpus = int64(info.NCPU)
 	e.Memory = info.MemTotal
 	e.Labels = map[string]string{
 		"storagedriver":   info.Driver,
@@ -523,8 +523,8 @@ func (e *Engine) updateSpecs() error {
 
 // RemoveImage deletes an image from the engine.
 func (e *Engine) RemoveImage(name string, force bool) ([]types.ImageDelete, error) {
-	rmOpts := types.ImageRemoveOptions{name, force, true}
-	dels, err := e.apiClient.ImageRemove(context.TODO(), rmOpts)
+	rmOpts := types.ImageRemoveOptions{force, true}
+	dels, err := e.apiClient.ImageRemove(context.Background(), name, rmOpts)
 	e.CheckConnectionErr(err)
 	e.RefreshImages()
 	return dels, err
@@ -532,7 +532,7 @@ func (e *Engine) RemoveImage(name string, force bool) ([]types.ImageDelete, erro
 
 // RemoveNetwork removes a network from the engine.
 func (e *Engine) RemoveNetwork(network *Network) error {
-	err := e.apiClient.NetworkRemove(context.TODO(), network.ID)
+	err := e.apiClient.NetworkRemove(context.Background(), network.ID)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -563,7 +563,7 @@ func (e *Engine) AddNetwork(network *Network) {
 
 // RemoveVolume deletes a volume from the engine.
 func (e *Engine) RemoveVolume(name string) error {
-	err := e.apiClient.VolumeRemove(context.TODO(), name)
+	err := e.apiClient.VolumeRemove(context.Background(), name)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -581,7 +581,7 @@ func (e *Engine) RemoveVolume(name string) error {
 // RefreshImages refreshes the list of images on the engine.
 func (e *Engine) RefreshImages() error {
 	imgLstOpts := types.ImageListOptions{All: true}
-	images, err := e.apiClient.ImageList(context.TODO(), imgLstOpts)
+	images, err := e.apiClient.ImageList(context.Background(), imgLstOpts)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -598,7 +598,7 @@ func (e *Engine) RefreshImages() error {
 // RefreshNetworks refreshes the list of networks on the engine.
 func (e *Engine) RefreshNetworks() error {
 	netLsOpts := types.NetworkListOptions{filters.NewArgs()}
-	networks, err := e.apiClient.NetworkList(context.TODO(), netLsOpts)
+	networks, err := e.apiClient.NetworkList(context.Background(), netLsOpts)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -614,7 +614,7 @@ func (e *Engine) RefreshNetworks() error {
 
 // RefreshVolumes refreshes the list of volumes on the engine.
 func (e *Engine) RefreshVolumes() error {
-	volumesLsRsp, err := e.apiClient.VolumeList(context.TODO(), filters.NewArgs())
+	volumesLsRsp, err := e.apiClient.VolumeList(context.Background(), filters.NewArgs())
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -636,7 +636,7 @@ func (e *Engine) RefreshContainers(full bool) error {
 		All:  true,
 		Size: false,
 	}
-	containers, err := e.apiClient.ContainerList(context.TODO(), opts)
+	containers, err := e.apiClient.ContainerList(context.Background(), opts)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -669,7 +669,7 @@ func (e *Engine) refreshContainer(ID string, full bool) (*Container, error) {
 		Size:   false,
 		Filter: filterArgs,
 	}
-	containers, err := e.apiClient.ContainerList(context.TODO(), opts)
+	containers, err := e.apiClient.ContainerList(context.Background(), opts)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return nil, err
@@ -724,7 +724,7 @@ func (e *Engine) updateContainer(c types.Container, containers map[string]*Conta
 
 	// Update ContainerInfo.
 	if full {
-		info, err := e.apiClient.ContainerInspect(context.TODO(), c.ID)
+		info, err := e.apiClient.ContainerInspect(context.Background(), c.ID)
 		e.CheckConnectionErr(err)
 		if err != nil {
 			return nil, err
@@ -738,7 +738,7 @@ func (e *Engine) updateContainer(c types.Container, containers map[string]*Conta
 		}
 		container.Config = BuildContainerConfig(*info.Config, *info.HostConfig, networkingConfig)
 		// FIXME remove "duplicate" line and move this to cluster/config.go
-		container.Config.HostConfig.CPUShares = container.Config.HostConfig.CPUShares * int64(e.Cpus) / 1024.0
+		container.Config.HostConfig.CPUShares = container.Config.HostConfig.CPUShares * e.Cpus / 1024.0
 
 		// Save the entire inspect back into the container.
 		container.Info = info
@@ -857,8 +857,8 @@ func (e *Engine) TotalMemory() int64 {
 }
 
 // TotalCpus returns the total cpus + overcommit
-func (e *Engine) TotalCpus() int {
-	return e.Cpus + (e.Cpus * int(e.overcommitRatio) / 100)
+func (e *Engine) TotalCpus() int64 {
+	return e.Cpus + (e.Cpus * e.overcommitRatio / 100)
 }
 
 // Create a new container
@@ -878,7 +878,7 @@ func (e *Engine) Create(config *ContainerConfig, name string, pullImage bool, au
 	// FIXME remove "duplicate" lines and move this to cluster/config.go
 	dockerConfig.HostConfig.CPUShares = int64(math.Ceil(float64(config.HostConfig.CPUShares*1024) / float64(e.Cpus)))
 
-	createResp, err = e.apiClient.ContainerCreate(context.TODO(), &dockerConfig.Config, &dockerConfig.HostConfig, &dockerConfig.NetworkingConfig, name)
+	createResp, err = e.apiClient.ContainerCreate(context.Background(), &dockerConfig.Config, &dockerConfig.HostConfig, &dockerConfig.NetworkingConfig, name)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		// If the error is other than not found, abort immediately.
@@ -890,7 +890,7 @@ func (e *Engine) Create(config *ContainerConfig, name string, pullImage bool, au
 			return nil, err
 		}
 		// ...And try again.
-		createResp, err = e.apiClient.ContainerCreate(context.TODO(), &dockerConfig.Config, &dockerConfig.HostConfig, &dockerConfig.NetworkingConfig, name)
+		createResp, err = e.apiClient.ContainerCreate(context.Background(), &dockerConfig.Config, &dockerConfig.HostConfig, &dockerConfig.NetworkingConfig, name)
 		e.CheckConnectionErr(err)
 		if err != nil {
 			return nil, err
@@ -916,11 +916,10 @@ func (e *Engine) Create(config *ContainerConfig, name string, pullImage bool, au
 // RemoveContainer removes a container from the engine.
 func (e *Engine) RemoveContainer(container *Container, force, volumes bool) error {
 	opts := types.ContainerRemoveOptions{
-		ContainerID:   container.ID,
 		Force:         force,
 		RemoveVolumes: volumes,
 	}
-	err := e.apiClient.ContainerRemove(context.TODO(), opts)
+	err := e.apiClient.ContainerRemove(context.Background(), container.ID, opts)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -936,8 +935,8 @@ func (e *Engine) RemoveContainer(container *Container, force, volumes bool) erro
 }
 
 // CreateNetwork creates a network in the engine
-func (e *Engine) CreateNetwork(request *types.NetworkCreate) (*types.NetworkCreateResponse, error) {
-	response, err := e.apiClient.NetworkCreate(context.TODO(), *request)
+func (e *Engine) CreateNetwork(name string, request *types.NetworkCreate) (*types.NetworkCreateResponse, error) {
+	response, err := e.apiClient.NetworkCreate(context.Background(), name, *request)
 	e.CheckConnectionErr(err)
 
 	e.RefreshNetworks()
@@ -946,56 +945,52 @@ func (e *Engine) CreateNetwork(request *types.NetworkCreate) (*types.NetworkCrea
 }
 
 // CreateVolume creates a volume in the engine
-func (e *Engine) CreateVolume(request *types.VolumeCreateRequest) (*Volume, error) {
-	volume, err := e.apiClient.VolumeCreate(context.TODO(), *request)
-
-	e.RefreshVolumes()
+func (e *Engine) CreateVolume(request *types.VolumeCreateRequest) (*types.Volume, error) {
+	volume, err := e.apiClient.VolumeCreate(context.Background(), *request)
 	e.CheckConnectionErr(err)
-
 	if err != nil {
 		return nil, err
 	}
-	return &Volume{Volume: volume, Engine: e}, nil
 
+	e.RefreshVolumes()
+
+	return &volume, err
 }
 
-// FIXME: This will become unnecessary after docker/engine-api#162 is merged
-func buildImagePullOptions(image string) (types.ImagePullOptions, error) {
-	distributionRef, err := reference.ParseNamed(image)
+// encodeAuthToBase64 serializes the auth configuration as JSON base64 payload
+func encodeAuthToBase64(authConfig *types.AuthConfig) (string, error) {
+	if authConfig == nil {
+		return "", nil
+	}
+	buf, err := json.Marshal(*authConfig)
 	if err != nil {
-		return types.ImagePullOptions{}, err
+		return "", err
 	}
-
-	name := distributionRef.Name()
-	tag := "latest"
-
-	switch x := distributionRef.(type) {
-	case reference.Canonical:
-		tag = x.Digest().String()
-	case reference.NamedTagged:
-		tag = x.Tag()
-	}
-
-	return types.ImagePullOptions{
-		ImageID: name,
-		Tag:     tag,
-	}, nil
+	return base64.URLEncoding.EncodeToString(buf), nil
 }
 
 // Pull an image on the engine
 func (e *Engine) Pull(image string, authConfig *types.AuthConfig) error {
-	pullOpts, err := buildImagePullOptions(image)
+	encodedAuth, err := encodeAuthToBase64(authConfig)
 	if err != nil {
 		return err
 	}
-	pullResponse, err := e.apiClient.ImagePull(context.TODO(), pullOpts, nil)
+	pullOpts := types.ImagePullOptions{
+		All:           false,
+		RegistryAuth:  encodedAuth,
+		PrivilegeFunc: nil,
+	}
+	// image is a ref here
+	pullResponseBody, err := e.apiClient.ImagePull(context.Background(), image, pullOpts)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
 	}
 
+	defer pullResponseBody.Close()
+
 	// wait until the image download is finished
-	dec := json.NewDecoder(pullResponse)
+	dec := json.NewDecoder(pullResponseBody)
 	m := map[string]interface{}{}
 	for {
 		if err := dec.Decode(&m); err != nil {
@@ -1017,14 +1012,17 @@ func (e *Engine) Pull(image string, authConfig *types.AuthConfig) error {
 
 // Load an image on the engine
 func (e *Engine) Load(reader io.Reader) error {
-	loadResponse, err := e.apiClient.ImageLoad(context.TODO(), reader, false)
+	loadResponse, err := e.apiClient.ImageLoad(context.Background(), reader, false)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
 	}
 
+	defer loadResponse.Body.Close()
+
 	// wait until the image load is finished
 	dec := json.NewDecoder(loadResponse.Body)
+
 	m := map[string]interface{}{}
 	for {
 		if err := dec.Decode(&m); err != nil {
@@ -1046,14 +1044,16 @@ func (e *Engine) Load(reader io.Reader) error {
 }
 
 // Import image
-func (e *Engine) Import(source string, repository string, tag string, imageReader io.Reader) error {
-	opts := types.ImageImportOptions{
-		SourceName:     source,
-		RepositoryName: repository,
-		Tag:            tag,
-		Source:         imageReader,
+func (e *Engine) Import(source string, ref string, tag string, imageReader io.Reader) error {
+	importSrc := types.ImageImportSource{
+		Source:     imageReader,
+		SourceName: source,
 	}
-	_, err := e.apiClient.ImageImport(context.TODO(), opts)
+	opts := types.ImageImportOptions{
+		Tag: tag,
+	}
+
+	_, err := e.apiClient.ImageImport(context.Background(), importSrc, ref, opts)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -1147,7 +1147,7 @@ func (e *Engine) handler(msg events.Message) error {
 		e.RefreshImages()
 	case "container":
 		switch msg.Action {
-		case "die", "kill", "oom", "pause", "start", "restart", "stop", "unpause", "rename":
+		case "die", "kill", "oom", "pause", "start", "restart", "stop", "unpause", "rename", "update":
 			e.refreshContainer(msg.ID, true)
 		default:
 			e.refreshContainer(msg.ID, false)
@@ -1232,7 +1232,8 @@ func (e *Engine) StartContainer(id string, hostConfig *dockerclient.HostConfig) 
 	if hostConfig != nil {
 		err = e.client.StartContainer(id, hostConfig)
 	} else {
-		err = e.apiClient.ContainerStart(context.TODO(), id)
+		// TODO(nishanttotla): Figure out what the checkpoint id (second string argument) should be
+		err = e.apiClient.ContainerStart(context.Background(), id, "")
 	}
 	e.CheckConnectionErr(err)
 	if err != nil {
@@ -1247,7 +1248,7 @@ func (e *Engine) StartContainer(id string, hostConfig *dockerclient.HostConfig) 
 // RenameContainer renames a container
 func (e *Engine) RenameContainer(container *Container, newName string) error {
 	// send rename request
-	err := e.apiClient.ContainerRename(context.TODO(), container.ID, newName)
+	err := e.apiClient.ContainerRename(context.Background(), container.ID, newName)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err
@@ -1259,8 +1260,8 @@ func (e *Engine) RenameContainer(container *Container, newName string) error {
 }
 
 // BuildImage builds an image
-func (e *Engine) BuildImage(buildImage *types.ImageBuildOptions) (io.ReadCloser, error) {
-	resp, err := e.apiClient.ImageBuild(context.TODO(), *buildImage)
+func (e *Engine) BuildImage(buildContext io.Reader, buildImage *types.ImageBuildOptions) (io.ReadCloser, error) {
+	resp, err := e.apiClient.ImageBuild(context.Background(), buildContext, *buildImage)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return nil, err
@@ -1269,15 +1270,13 @@ func (e *Engine) BuildImage(buildImage *types.ImageBuildOptions) (io.ReadCloser,
 }
 
 // TagImage tags an image
-func (e *Engine) TagImage(IDOrName string, repo string, tag string, force bool) error {
+func (e *Engine) TagImage(IDOrName string, ref string, force bool) error {
 	// send tag request to docker engine
 	opts := types.ImageTagOptions{
-		ImageID:        IDOrName,
-		RepositoryName: repo,
-		Tag:            tag,
-		Force:          force,
+		Force: force,
 	}
-	err := e.apiClient.ImageTag(context.TODO(), opts)
+
+	err := e.apiClient.ImageTag(context.Background(), IDOrName, ref, opts)
 	e.CheckConnectionErr(err)
 	if err != nil {
 		return err

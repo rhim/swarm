@@ -16,7 +16,7 @@ This page teaches you to deploy a high-availability Docker Swarm cluster.
 Although the example installation uses the Amazon Web Services (AWS) platform,
 you can deploy an equivalent Docker Swarm cluster on many other platforms. In this example, you do the following:
 
-- [Verify you have the prequisites](#prerequisites)
+- [Verify you have the prerequisites](#prerequisites)
 - [Establish basic network security](#step-1-add-network-security-rules)
 - [Create your nodes](#step-2-create-your-instances)
 - [Install Engine on each node](#step-3-install-engine-on-each-node)
@@ -26,7 +26,7 @@ you can deploy an equivalent Docker Swarm cluster on many other platforms. In th
 - [Test the high-availability Swarm managers](#step-7-test-swarm-failover)
 - [Additional Resources](#additional-resources)
 
-For a gentler introduction to Swarm, try the [Evaluate Swarm in a sandbox](install-w-machine) page.
+For a gentler introduction to Swarm, try the [Evaluate Swarm in a sandbox](install-w-machine.md) page.
 
 ## Prerequisites
 
@@ -221,7 +221,7 @@ After creating the discovery backend, you can create the Swarm managers. In this
 
       Replacing `<manager1_ip>` with the IP address from the previous command, for example:
 
-        $ docker run -d swarm manage -H :4000 --replication --advertise <manager1_ip>:4000 consul://172.30.0.161:8500
+        $ docker run -d -p 4000:4000 swarm manage -H :4000 --replication --advertise <manager1_ip>:4000 consul://172.30.0.161:8500
 
 5. Enter `docker ps`to verify that a Swarm container is running.
 
