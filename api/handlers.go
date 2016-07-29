@@ -1,5 +1,11 @@
 package api
 
+/*
+ * ContainerX modifications
+ *
+ * Modified to add support for adding filters by pool
+ *
+ */
 import (
 	"bytes"
 	"encoding/base64"

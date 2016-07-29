@@ -1,5 +1,10 @@
 package swarm
 
+/*
+ * ContainerX modifications
+ *
+ * Modified to add support for filtering by pool
+ */
 import (
 	"crypto/tls"
 	"errors"
